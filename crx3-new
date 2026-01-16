@@ -5,13 +5,36 @@ let crx = require('./index')
 let u = crx.u
 
 async function main() {
-    if (!process.argv[2]) u.err(`Usage: ${u.progname()} private.pem < file.zip`)
+    let args = process.argv.slice(2)
+    let useKms = args[0] === '--kms'
+    if (useKms) args.shift()
 
-    let [kp, zip] = await Promise.all([crx.keypair(process.argv[2]), u.read()])
-	.catch(u.err)
+    if (!args[0]) {
+        u.err(`Usage: ${u.progname()} [--kms] <private.pem | kms-key-id> < file.zip
+
+Options:
+  --kms    Use AWS KMS for signing. The argument should be a KMS key ID,
+           ARN, or alias (e.g., 'alias/my-signing-key').
+           Requires AWS credentials to be configured.
+
+Examples:
+  ${u.progname()} private.pem < extension.zip > extension.crx
+  ${u.progname()} --kms alias/chrome-signing-key < extension.zip > extension.crx`)
+    }
+
+    let kp, zip
+    if (useKms) {
+        const { KMSClient } = require('@aws-sdk/client-kms')
+        const kmsClient = new KMSClient()
+            ;[kp, zip] = await Promise.all([crx.kmsKeypair(kmsClient, args[0]), u.read()])
+                .catch(u.err)
+    } else {
+        ;[kp, zip] = await Promise.all([crx.keypair(args[0]), u.read()])
+            .catch(u.err)
+    }
 
     let maker = new crx.Maker(kp, zip)
-    process.stdout.write(maker.creat())
+    process.stdout.write(await maker.creat())
 }
 
 main()

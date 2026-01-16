@@ -1,11 +1,12 @@
 {
     "name": "crx3-utils",
-    "version": "0.0.3",
-    "author": "Alexander Gromnitsky",
+    "version": "0.0.4",
+    "author": "DuckDuckGo, forked from Alexander Gromnitsky",
     "description": "Create CRX3 files without Chrome, extract public keys, verify signatures; cli & api",
     "license": "MIT",
     "repository": "github:gromnitsky/crx3-utils",
     "dependencies": {
+        "@aws-sdk/client-kms": "^3.0.0",
         "pbf": "^3.2.0"
     },
     "engines": {

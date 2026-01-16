@@ -68,6 +68,19 @@ exports.keypair = function(file) {
     }))
 }
 
+// Create a keypair object backed by AWS KMS
+// kmsClient: an instance of @aws-sdk/client-kms KMSClient
+// keyId: KMS key ID, ARN, or alias (e.g., 'alias/my-signing-key')
+exports.kmsKeypair = async function(kmsClient, keyId) {
+    const { GetPublicKeyCommand } = require('@aws-sdk/client-kms')
+    const response = await kmsClient.send(new GetPublicKeyCommand({ KeyId: keyId }))
+    return {
+        public_der: Buffer.from(response.PublicKey),
+        kmsClient: kmsClient,
+        kmsKeyId: keyId
+    }
+}
+
 exports.Maker = class {
     constructor(keypair, payload) {
 	this.key = keypair
@@ -85,38 +98,57 @@ exports.Maker = class {
 	)
     }
 
-    sign() {
-	return this.signature_data_update(crypto.createSign('sha256'))
-	    .sign(this.key.private)
+    // Returns the data that needs to be signed as a Buffer
+    getSignatureData() {
+        let magic_str = Buffer.from("CRX3 SignedData\x00")
+        return Buffer.concat([
+            magic_str,
+            len(this.signed_data()),
+            this.signed_data(),
+            this.payload
+        ])
     }
 
-    signature_data_update(signature) {
-	let magic_str = "CRX3 SignedData\x00"
-	return signature.update(magic_str)
-	    .update(len(this.signed_data()))
-	    .update(this.signed_data())
-	    .update(this.payload)
+    async sign() {
+        const dataToSign = this.getSignatureData()
+
+        if (this.key.kmsClient) {
+            // KMS path: hash locally, sign via KMS
+            const { SignCommand } = require('@aws-sdk/client-kms')
+            const digest = crypto.createHash('sha256').update(dataToSign).digest()
+            const response = await this.key.kmsClient.send(new SignCommand({
+                KeyId: this.key.kmsKeyId,
+                Message: digest,
+                MessageType: 'DIGEST',
+                SigningAlgorithm: 'RSASSA_PKCS1_V1_5_SHA_256'
+            }))
+            return Buffer.from(response.Signature)
+        } else {
+            // Local key path
+            return crypto.createSign('sha256').update(dataToSign).sign(this.key.private)
+        }
     }
 
-    header() {
-	let pb = new Pbf()
-	crx3_pb.CrxFileHeader.write({
-	    sha256_with_rsa: [{	// AsymmetricKeyProof
-		public_key: this.key.public_der,
-		signature: this.sign()
-	    }],
-	    signed_header_data: this.signed_data()
-	}, pb)
-	return pb.finish()
+    async header() {
+        let pb = new Pbf()
+        crx3_pb.CrxFileHeader.write({
+            sha256_with_rsa: [{	// AsymmetricKeyProof
+            public_key: this.key.public_der,
+            signature: await this.sign()
+            }],
+            signed_header_data: this.signed_data()
+        }, pb)
+        return pb.finish()
     }
 
-    creat() {
-	let magic_str = Buffer.from('Cr24')
-	let version = len('xxx')
-	let header_size = len(this.header())
+    async creat() {
+        let magic_str = Buffer.from('Cr24')
+        let version = len('xxx')
+        let header = await this.header()
+        let header_size = len(header)
 
-	return Buffer.concat([magic_str, version, header_size, this.header(),
-			      this.payload])
+        return Buffer.concat([magic_str, version, header_size, header,
+                    this.payload])
     }
 }
 

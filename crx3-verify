@@ -21,7 +21,8 @@ function verify(hdr) {
 	let main_public_key = hdr.sha256_with_rsa[main_idx].public_key
 
 	let maker = new crx.Maker({public_der: main_public_key}, hdr.payload)
-	let v = maker.signature_data_update(crypto.createVerify('sha256')).end()
+	let dataToVerify = maker.getSignatureData()
+	let v = crypto.createVerify('sha256').update(dataToVerify)
 	if (!v.verify(key, container.signature)) process.exitCode = 1
     })
 }

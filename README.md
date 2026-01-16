@@ -7,13 +7,51 @@ extensions to the CRX3 file format.
 
     $ npm -g i crx3-utils
 
-Usage:
+## Usage
 
-    $ crx3-new private.pem < file.zip
+Create a signed CRX3 file with a local private key:
+
+    $ crx3-new private.pem < file.zip > extension.crx
+
+Create a signed CRX3 file with AWS KMS (private key never leaves KMS):
+
+    $ crx3-new --kms alias/my-signing-key < file.zip > extension.crx
+    $ crx3-new --kms arn:aws:kms:us-east-1:123456789:key/abc-123 < file.zip > extension.crx
 
 The util is intentionally bare bone: it doesn't generate a private key
 for you (use openssl for that) & it doesn't compress your directory
 (use zip for that).
+
+## AWS KMS Signing
+
+To use KMS signing, you need:
+
+1. An RSA key in AWS KMS (minimum 2048-bit, recommend 4096-bit)
+2. AWS credentials configured (via environment, IAM role, etc.)
+3. IAM permissions for `kms:Sign` and `kms:GetPublicKey` on the key
+
+This approach is more secure than storing keys in files or CI secrets:
+- The private key material never leaves KMS
+- Full audit logging of all signing operations
+- No long-lived credentials if using OIDC federation
+
+### Programmatic API
+
+~~~javascript
+const crx = require('crx3-utils')
+const { KMSClient } = require('@aws-sdk/client-kms')
+
+// With AWS KMS
+const kmsClient = new KMSClient({ region: 'us-east-1' })
+const kp = await crx.kmsKeypair(kmsClient, 'alias/my-signing-key')
+const maker = new crx.Maker(kp, zipBuffer)
+const crxBuffer = await maker.creat()
+
+// With local key file (note: creat() is now async)
+const kp = await crx.keypair('private.pem')
+const maker = new crx.Maker(kp, zipBuffer)
+const crxBuffer = await maker.creat()
+~~~
 
 Print info for a .crx downloaded from the Chome Web Store:
 
@@ -54,6 +92,14 @@ zQIDAQAB
 Validate (returns 0 on success):
 
     $ crx3-verify rsa 0 public.pem < file.crx
+
+## Breaking Changes (v0.0.4)
+
+The `Maker` class methods are now async to support KMS:
+
+- `maker.creat()` → `await maker.creat()`
+- `maker.sign()` → `await maker.sign()`
+- `maker.header()` → `await maker.header()`
 
 ## License
 
